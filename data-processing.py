@@ -7,6 +7,8 @@ import numpy as np
 import joblib # For saving preprocessors
 import traceback # For detailed error printing
 import os # For creating output directory
+import torch
+from feature_classification import CICIoTFeatureClassifier
 
 # --- Configuration & Parameters ---
 # !!! USER: YOU MUST ADJUST THESE BASED ON YOUR FINAL DEVICE CLASS MAPPING AND FEATURE ANALYSIS !!!
@@ -259,8 +261,180 @@ def handle_high_cardinality_categorical(df_train_input, df_val_input, df_test_in
     return df_train, df_val, df_test
 
 # --- 主要预处理流程 (Main Preprocessing Pipeline) ---
-def main_preprocess_pipeline(filepath_list, nrows_per_file=None):
-    """主要预处理流程 (Main preprocessing pipeline)."""
+def compute_ple_bins(X_train_numerical, y_train, n_bins=64, task='classification'):
+    """
+    计算PLE模块所需的bin边界
+    
+    Args:
+        X_train_numerical: 训练集数值特征DataFrame
+        y_train: 训练集标签
+        n_bins: bin数量
+        task: 任务类型 ('classification' 或 'regression')
+    
+    Returns:
+        bins: PLE bin边界列表
+    """
+    print(f"\n🔢 计算PLE bin边界 (n_bins={n_bins}, task={task})...")
+    
+    try:
+        from saint.models.layers import compute_bins
+        
+        # 转换为tensor
+        X_tensor = torch.from_numpy(X_train_numerical.values.astype(np.float32))
+        
+        # 处理标签
+        if hasattr(y_train, 'values'):
+            y_values = y_train.values
+        else:
+            y_values = y_train
+            
+        # 如果是分类任务，需要将标签转换为数值
+        if task == 'classification':
+            if y_values.dtype == 'object':
+                # 临时编码标签
+                le_temp = LabelEncoder()
+                y_values = le_temp.fit_transform(y_values)
+        
+        y_tensor = torch.from_numpy(y_values.astype(np.float32))
+        
+        # 计算bins
+        bins = compute_bins(
+            X_tensor, 
+            n_bins=n_bins, 
+            y=y_tensor, 
+            regression=(task=='regression')
+        )
+        
+        print(f"   ✅ 成功计算 {len(bins)} 个数值特征的bin边界")
+        print(f"   平均每特征bin数: {np.mean([len(b)-1 for b in bins]):.1f}")
+        
+        return bins
+        
+    except ImportError:
+        print("   ⚠️  SAINT模块未找到，跳过PLE bin计算")
+        return None
+    except Exception as e:
+        print(f"   ❌ PLE bin计算失败: {e}")
+        return None
+
+def create_feature_index_mapping(categorical_features, numerical_features, all_columns):
+    """
+    创建特征索引映射表
+    
+    Args:
+        categorical_features: 类别特征列表
+        numerical_features: 数值特征列表
+        all_columns: 所有列名列表
+    
+    Returns:
+        feature_mapping: 特征映射字典
+    """
+    print("\n📋 创建特征索引映射表...")
+    
+    # 创建列名到索引的映射
+    column_to_index = {col: idx for idx, col in enumerate(all_columns)}
+    
+    # 获取特征索引
+    cat_indices = [column_to_index[col] for col in categorical_features if col in column_to_index]
+    num_indices = [column_to_index[col] for col in numerical_features if col in column_to_index]
+    
+    feature_mapping = {
+        'categorical_features': categorical_features,
+        'numerical_features': numerical_features,
+        'cat_indices': cat_indices,
+        'num_indices': num_indices,
+        'cat_idxs': cat_indices,  # SAINT格式
+        'con_idxs': num_indices,  # SAINT格式
+        'total_features': len(categorical_features) + len(numerical_features),
+        'column_to_index': column_to_index
+    }
+    
+    print(f"   ✅ 类别特征: {len(categorical_features)} 个")
+    print(f"   ✅ 数值特征: {len(numerical_features)} 个")
+    print(f"   ✅ 总特征数: {feature_mapping['total_features']} 个")
+    
+    return feature_mapping
+
+def format_for_saint(X_train, X_val, X_test, y_train, y_val, y_test, 
+                    categorical_features, numerical_features, label_encoders, 
+                    bins=None):
+    """
+    将预处理后的数据格式化为SAINT所需格式
+    
+    Args:
+        X_train, X_val, X_test: 特征数据
+        y_train, y_val, y_test: 标签数据
+        categorical_features: 类别特征列表
+        numerical_features: 数值特征列表
+        label_encoders: 标签编码器
+        bins: PLE bin边界
+    
+    Returns:
+        saint_data: SAINT格式的数据字典
+    """
+    print("\n🔄 格式化数据为SAINT格式...")
+    
+    # 计算类别维度
+    cat_dims = []
+    for cat_feat in categorical_features:
+        if cat_feat in label_encoders:
+            cat_dims.append(len(label_encoders[cat_feat].classes_))
+        else:
+            # 如果没有编码器，估算唯一值数量
+            unique_vals = pd.concat([X_train[cat_feat], X_val[cat_feat], X_test[cat_feat]]).nunique()
+            cat_dims.append(unique_vals)
+    
+    # 添加CLS token维度（通常为1）
+    cat_dims = [1] + cat_dims
+    
+    # 获取特征索引（相对于输入特征的索引）
+    cat_idxs = list(range(len(categorical_features)))
+    con_idxs = list(range(len(categorical_features), 
+                         len(categorical_features) + len(numerical_features)))
+    
+    # 创建数据字典
+    def prepare_data(X, y):
+        return {
+            'data': X.values,
+            'mask': np.ones_like(X.values)  # 假设无缺失值
+        }, {'data': y.values.reshape(-1, 1) if hasattr(y, 'values') else y.reshape(-1, 1)}
+    
+    X_train_dict, y_train_dict = prepare_data(X_train, y_train)
+    X_val_dict, y_val_dict = prepare_data(X_val, y_val)
+    X_test_dict, y_test_dict = prepare_data(X_test, y_test)
+    
+    saint_data = {
+        'cat_dims': cat_dims,
+        'cat_idxs': cat_idxs,
+        'con_idxs': con_idxs,
+        'X_train': X_train_dict,
+        'y_train': y_train_dict,
+        'X_val': X_val_dict,
+        'y_val': y_val_dict,
+        'X_test': X_test_dict,
+        'y_test': y_test_dict,
+        'num_classes': len(np.unique(y_train)),
+        'bins': bins,
+        'categorical_features': categorical_features,
+        'numerical_features': numerical_features
+    }
+    
+    print(f"   ✅ SAINT数据格式化完成")
+    print(f"      类别维度: {cat_dims}")
+    print(f"      类别索引: {cat_idxs}")
+    print(f"      数值索引: {con_idxs}")
+    print(f"      类别数: {saint_data['num_classes']}")
+    
+    return saint_data
+
+def main_preprocess_pipeline(filepath_list, nrows_per_file=None, use_auto_feature_classification=True):
+    """主要预处理流程 (Main preprocessing pipeline with enhanced feature classification)."""
+    
+    # 0. 可选的自动特征分类
+    if use_auto_feature_classification:
+        print("🏷️  启用自动特征分类模式...")
+        classifier = CICIoTFeatureClassifier()
+    
     # 1. 加载并合并数据
     df_raw = load_and_combine_data(filepath_list, nrows_per_file=nrows_per_file)
 
@@ -366,13 +540,52 @@ def main_preprocess_pipeline(filepath_list, nrows_per_file=None):
     print("\n预处理完成。(Preprocessing complete.)")
     print(f"最终 X_train 形状: {X_train.shape} (Final X_train shape: {X_train.shape})")
 
+    # --- 新增: PLE bins计算 (NEW: PLE bins computation) ---
+    bins = None
+    if final_numerical_features:
+        print("\n🔢 计算PLE模块的bin边界...")
+        bins = compute_ple_bins(
+            X_train[final_numerical_features], 
+            y_train, 
+            n_bins=64, 
+            task='classification'
+        )
+    
+    # --- 新增: 创建特征索引映射 (NEW: Create feature index mapping) ---
+    feature_mapping = create_feature_index_mapping(
+        final_categorical_features, 
+        final_numerical_features, 
+        list(X_train.columns)
+    )
+    
+    # --- 新增: SAINT格式化 (NEW: SAINT formatting) ---
+    print("\n🎯 格式化数据为SAINT模型格式...")
+    saint_data = format_for_saint(
+        X_train, X_val, X_test, 
+        y_train, y_val, y_test,
+        final_categorical_features, 
+        final_numerical_features, 
+        label_encoders, 
+        bins
+    )
+
     # --- 保存处理后的数据和预处理器 (Save processed data and preprocessors) ---
     print(f"\n正在保存预处理器到 '{OUTPUT_DIR}'... (Saving preprocessors to '{OUTPUT_DIR}'...)")
     joblib.dump(label_encoders, os.path.join(OUTPUT_DIR, 'label_encoders.joblib'))
     if final_numerical_features:
         joblib.dump(num_imputer, os.path.join(OUTPUT_DIR, 'num_imputer.joblib'))
         joblib.dump(scaler, os.path.join(OUTPUT_DIR, 'scaler.joblib'))
+    
+    # 保存PLE bins和特征映射
+    if bins is not None:
+        joblib.dump(bins, os.path.join(OUTPUT_DIR, 'ple_bins.joblib'))
+        print("PLE bin边界已保存。(PLE bins saved.)")
+    
+    joblib.dump(feature_mapping, os.path.join(OUTPUT_DIR, 'feature_mapping.joblib'))
+    joblib.dump(saint_data, os.path.join(OUTPUT_DIR, 'saint_data.joblib'))
+    
     print("预处理器已保存。(Preprocessors saved.)")
+    print("SAINT数据已保存。(SAINT data saved.)")
 
     print(f"\n正在保存处理后的数据到 '{OUTPUT_DIR}'... (Saving processed data to '{OUTPUT_DIR}'...)")
     try:
@@ -388,11 +601,28 @@ def main_preprocess_pipeline(filepath_list, nrows_per_file=None):
         traceback.print_exc()
 
 
-    return X_train, X_val, X_test, y_train, y_val, y_test, \
-           label_encoders, \
-           num_imputer if final_numerical_features else None, \
-           scaler if final_numerical_features else None, \
-           final_categorical_features, final_numerical_features
+    # 返回增强的结果字典
+    results = {
+        'X_train': X_train, 'X_val': X_val, 'X_test': X_test,
+        'y_train': y_train, 'y_val': y_val, 'y_test': y_test,
+        'categorical_features': final_categorical_features,
+        'numerical_features': final_numerical_features,
+        'label_encoders': label_encoders,
+        'scaler': scaler if final_numerical_features else None,
+        'imputer': num_imputer if final_numerical_features else None,
+        'ple_bins': bins,
+        'feature_mapping': feature_mapping,
+        'saint_data': saint_data,
+        'output_dir': OUTPUT_DIR
+    }
+    
+    print("\n🎉 完整预处理流程完成！")
+    print(f"   ✅ 数据已保存到: {OUTPUT_DIR}")
+    print(f"   ✅ PLE bins: {'已计算' if bins else '跳过'}")
+    print(f"   ✅ SAINT格式: 已完成")
+    print(f"   ✅ 特征映射: 已创建")
+    
+    return results
 
 
 # --- 主执行示例 (Main Execution Example) ---
