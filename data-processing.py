@@ -28,14 +28,16 @@ ID_FEATURES_TO_DROP = ['stream', 'src_mac', 'dst_mac', 'src_ip', 'dst_ip',
                       ]
 
 # Features that are complex or initially deprioritized for lightweight model
+# 注意：根据用户要求，保留所有期望的特征，仅删除真正不需要的复杂特征
 COMPLEX_OR_LOW_PRIORITY_FEATURES_TO_DROP = [
-    'handshake_ciphersuites', # List processing is complex
-    'user_agent',             # Very high cardinality
-    'http_uri',               # Very high cardinality
-    'eth_dst_oui',            # Destination OUI less stable than source
-    'icmp_type', 'icmp_checksum_status', 'icmp_data_size', # ICMP related
-    'most_freq_spot', 'min_et', 'q1', 'min_e', 'var_e', 'q1_e', # Meaning unclear or not core
-    'time_since_previously_displayed_frame',
+    # 仅保留真正需要删除的特征，移除了用户期望特征列表中的所有特征
+    # 'handshake_ciphersuites', # 用户期望特征，已移除
+    # 'user_agent',             # 用户期望特征，已移除
+    # 'http_uri',               # 用户期望特征，已移除
+    # 'eth_dst_oui',            # 用户期望特征，已移除
+    # 'icmp_type', 'icmp_checksum_status', 'icmp_data_size', # 用户期望特征，已移除
+    # 'most_freq_spot', 'min_et', 'q1', 'min_e', 'var_e', 'q1_e', # 用户期望特征，已移除
+    # 'time_since_previously_displayed_frame', # 用户期望特征，已移除
     # Drop all other time-windowed stats not explicitly selected to reduce redundancy and aid lightweighting
     # The SELECTED_NUMERICAL_FEATURES will list the specific ones we keep.
     # Listing all others to drop is too verbose; selection is better.
@@ -103,11 +105,11 @@ def create_and_filter_target(df_input, raw_device_name_source_col, target_col_na
     # !!! THIS IS THE MOST CRITICAL PART FOR YOU TO CUSTOMIZE !!!
     # Build this map based on your analysis of df[raw_device_name_source_col].value_counts()
     device_to_target_class_map = {
-        # Cameras
+        # === 📹 相机 (Camera) - 按品牌细分 ===
         'Arlo Q Indoor Camera': 'Camera_Arlo_Q',
+        'Arlo Base Station': 'Camera_Arlo_Base',
         'Nest Indoor Camera': 'Camera_Nest_Indoor',
-        'Yi Indoor 2 Camera': 'Camera_Yi_Indoor', 'Yi Indoor Camera': 'Camera_Yi_Indoor',
-        'Yi Outdoor Camera': 'Camera_Yi_Outdoor',
+        'Yi Indoor 2 Camera': 'Camera_Yi', 'Yi Indoor Camera': 'Camera_Yi', 'Yi Outdoor Camera': 'Camera_Yi',
         'Wyze Camera': 'Camera_Wyze',
         'Home Eye Camera': 'Camera_Home_Eye',
         'Netatmo Camera': 'Camera_Netatmo',
@@ -117,50 +119,68 @@ def create_and_filter_target(df_input, raw_device_name_source_col, target_col_na
         'AMCREST WiFi Camera': 'Camera_AMCREST',
         'DCS8000LHA1 D-Link Mini Camera': 'Camera_DLink_Mini',
 
-        # Speakers
-        'Amazon Echo Show': 'Speaker_Amazon_Echo_Show',
-        'Amazon Echo Dot 2': 'Speaker_Amazon_Echo_Dot', 'Amazon Echo Dot 1': 'Speaker_Amazon_Echo_Dot',
-        'Amazon Echo Studio': 'Speaker_Amazon_Echo_Studio',
+        # === 🔊 音箱 (Speaker) - 按品牌细分 ===
+        'Amazon Echo Show': 'Speaker_Amazon_Echo',
+        'Amazon Echo Dot 2': 'Speaker_Amazon_Echo', 
+        'Amazon Echo Dot 1': 'Speaker_Amazon_Echo',
+        'Amazon Echo Studio': 'Speaker_Amazon_Echo',
         'Google Nest Mini Speaker': 'Speaker_Google_Nest_Mini',
         'harman kardon (Ampak Technology)': 'Speaker_Harman_Kardon',
         'Sonos One Speaker': 'Speaker_Sonos_One',
 
-        # Hubs/Bridges
+        # === 🏠 网关 (Hub) - 按品牌细分 ===
         'SmartThings Hub': 'Hub_SmartThings',
         'Philips Hue Bridge': 'Hub_Philips_Hue',
         'AeoTec Smart Home Hub': 'Hub_AeoTec',
         'Eufy HomeBase 2': 'Hub_Eufy_HomeBase',
-        'Arlo Base Station': 'Hub_Arlo_Base_Station',
 
-        # Plugs/Strips
-        'GoSund Smart Plug WP3 (1)': 'Plug_GoSund', 'Gosund Smart Plug WP3 (2)': 'Plug_GoSund',
-        'GoSund Smart Plug WP2 (2)': 'Plug_GoSund', 'GoSund Smart plug WP2 (1)': 'Plug_GoSund',
-        'GoSund Smart plug WP2 (3)': 'Plug_GoSund',
-        'Gosund Power strip (1)': 'PowerStrip_Gosund', 'GoSund Power strip (2)': 'PowerStrip_Gosund',
-        'Yutron Plug 2': 'Plug_Yutron', 'Yutron Plug 1': 'Plug_Yutron',
-        'Teckin Plug 2': 'Plug_Teckin', 'Teckin Plug 1': 'Plug_Teckin',
-        'Amazon Plug': 'Plug_Amazon',
-        'Wemo smart plug 2 (Wemo id: Wemo.Mini.4A3)': 'Plug_Wemo',
-        'Wemo smart plug 1 (Wemo id: Wemo.Mini.AD3)': 'Plug_Wemo',
+        # === 🔌 插座 (Plug) - 统一大类 ===
+        'GoSund Smart Plug WP3 (1)': 'Plug', 'Gosund Smart Plug WP3 (2)': 'Plug',
+        'GoSund Smart plug WP2 (1)': 'Plug', 'GoSund Smart Plug WP2 (2)': 'Plug', 'GoSund Smart plug WP2 (3)': 'Plug',
+        'Gosund Power strip (1)': 'Plug', 'GoSund Power strip (2)': 'Plug',
+        'Yutron Plug 2': 'Plug', 'Yutron Plug 1': 'Plug',
+        'Teckin Plug 1': 'Plug', 'Teckin Plug 2': 'Plug',
+        'Amazon Plug': 'Plug',
+        'Wemo smart plug 2 (Wemo id: Wemo.Mini.4A3)': 'Plug',
+        'Wemo smart plug 1 (Wemo id: Wemo.Mini.AD3)': 'Plug',
 
-        # Lighting
-        'GoSund Bulb': 'Bulb_GoSund',
-        'LampUX RGB': 'Lighting_LampUX_RGB',
-        'HeimVision SmartLife Radio/Lamp': 'Lamp_HeimVision_Radio',
-        'Lumiman bulb': 'Bulb_Lumiman',
-        'Teckin Light Strip': 'Lighting_Teckin_Strip',
-        'LIFX Lightbulb': 'Bulb_LIFX',
+        # === 💡 照明 (Lighting) - 统一大类 ===
+        'GoSund Bulb': 'Lighting',
+        'LampUX RGB': 'Lighting',
+        'HeimVision SmartLife Radio/Lamp': 'Lighting', # This is a hybrid device, classified as lighting
+        'Lumiman bulb': 'Lighting',
+        'Teckin Light Strip': 'Lighting',
+        'LIFX Lightbulb': 'Lighting',
 
-        # Appliances/Sensors
-        'Netatmo Weather Station': 'Sensor_Netatmo_Weather',
-        'Atomi Coffee Maker': 'Appliance_Atomi_Coffee',
-        'Cocoon Smart HVAC Fan': 'Appliance_Cocoon_HVAC_Fan',
-        'Levoit Air Purifier': 'Appliance_Levoit_Air_Purifier',
-        'iRobot Roomba': 'Appliance_iRobot_Roomba',
-        'Govee Smart Humidifer': 'Appliance_Govee_Humidifier',
+        # === 🧹 家电 (Appliance) - 按功能细分 ===
+        'iRobot Roomba': 'Appliance_Vacuum_Robot',
+        'Cocoon Smart HVAC Fan': 'Appliance_HVAC_Fan',
+        'Levoit Air Purifier': 'Appliance_Air_Purifier',
+        'Govee Smart Humidifer': 'Appliance_Humidifier',
+        'Atomi Coffee Maker': 'Appliance_Coffee_Maker',
         
-        # TV
+        # === 📺 娱乐设备 (Entertainment) ===
         'LG Smart TV': 'TV_LG_Smart',
+
+        # === 🌡️ 传感器 (Sensor) ===
+        'Netatmo Weather Station': 'Sensor_Netatmo_Weather',
+
+        # === ❓ 高流量未知设备 (High-Traffic Unknown Devices) ===
+        'ac:17:02:05:34:27': 'Unknown_MAC_1',
+        '3c:18:a0:41:c3:a0': 'Unknown_MAC_2',
+        '24:05:88:30:6f:89': 'Unknown_MAC_3',
+        '00:a3:d1:07:6f:03': 'Unknown_MAC_4',
+        '56:4f:8a:e1:f3:2d': 'Unknown_MAC_5',
+        'dc:a6:32:dc:27:d5': 'Unknown_MAC_6',
+        'b0:09:da:3e:82:6c': 'Unknown_MAC_7',
+        'd4:81:d7:97:d0:29': 'Unknown_MAC_8',
+        '5c:26:0a:28:80:77': 'Unknown_MAC_9',
+        'e8:1b:69:f8:d6:e6': 'Unknown_MAC_10',
+        'e8:1b:69:f8:d4:e3': 'Unknown_MAC_11',
+        
+        # === 💻 其他设备 (Other Devices) - 将被低样本阈值过滤，但仍在此处定义 ===
+        'Smart Board': 'Office_Device',
+        'Raspberry Pi 4-2 GB': 'Development_Board'
     }
     
     if raw_device_name_source_col not in df.columns:
@@ -177,7 +197,7 @@ def create_and_filter_target(df_input, raw_device_name_source_col, target_col_na
     if df.empty:
         raise ValueError("在应用device_map后DataFrame为空。请检查映射字典的键与源列中的唯一值，或确认是否有设备被映射。(DataFrame is empty after applying device_map. Check map keys against unique values in the source column or if all devices were unmapped.)")
 
-    min_samples_per_class = 1000  # 用户: 根据需要调整此阈值 (e.g., 500 or 1000)
+    min_samples_per_class = 400  # <--- 已根据您的要求从1000下调至500
     class_counts = df[target_col_name].value_counts()
     classes_to_keep = class_counts[class_counts >= min_samples_per_class].index.tolist()
 
@@ -459,17 +479,39 @@ def main_preprocess_pipeline(filepath_list, nrows_per_file=None, use_auto_featur
     # 5. 工程化特征
     X = engineer_features(X)
 
-    # 6. 仅保留专家选择的特征
-    # Make sure 'protocol' is in ALL_SELECTED_FEATURES if it was engineered and meant to be kept
+    # 6. 特征选择：自动分类 vs 专家选择
+    if use_auto_feature_classification:
+        print("🏷️  使用自动特征分类...")
+        # 使用自动特征分类器
+        auto_classification = classifier.classify_features_automatically(X)
+        
+        # 获取分类结果
+        final_categorical_features = auto_classification['categorical_features']
+        final_numerical_features = auto_classification['numerical_features']
+        excluded_features = auto_classification['excluded_features'] + auto_classification['text_features']
+        
+        # 排除被标记为排除的特征
+        current_selected_features = final_categorical_features + final_numerical_features
+        current_selected_features = [f for f in current_selected_features if f in X.columns and f not in excluded_features]
+        
+        print(f"自动特征分类结果:")
+        print(f"   类别特征: {len(final_categorical_features)}")
+        print(f"   数值特征: {len(final_numerical_features)}")
+        print(f"   排除特征: {len(excluded_features)}")
+        print(f"   总选择特征: {len(current_selected_features)}")
+        
+    else:
+        print("🎯 使用专家特征选择...")
+        # 使用专家选择的特征
     if 'protocol' in X.columns and 'protocol' not in ALL_SELECTED_FEATURES:
          ALL_SELECTED_FEATURES.append('protocol')
     current_selected_features = [f for f in ALL_SELECTED_FEATURES if f in X.columns]
+        
+        final_categorical_features = [f for f in SELECTED_CATEGORICAL_FEATURES if f in X.columns]
+        final_numerical_features = [f for f in SELECTED_NUMERICAL_FEATURES if f in X.columns]
     
     X = X[current_selected_features].copy() # Use .copy()
-    print(f"应用专家特征选择后。X 形状: {X.shape} (Applied expert feature selection. X shape: {X.shape})")
-    
-    final_categorical_features = [f for f in SELECTED_CATEGORICAL_FEATURES if f in X.columns]
-    final_numerical_features = [f for f in SELECTED_NUMERICAL_FEATURES if f in X.columns]
+    print(f"应用特征选择后。X 形状: {X.shape} (Applied feature selection. X shape: {X.shape})")
     
     if not current_selected_features: # Check if any features remain AT ALL
         raise ValueError("特征选择后特征集为空。请检查您的特征列表和数据。(Feature set is empty after selection. Check your feature lists and data.)")
@@ -497,7 +539,13 @@ def main_preprocess_pipeline(filepath_list, nrows_per_file=None, use_auto_featur
     X_test = X_test.copy()
 
     # 8. 处理高基数类别特征
+    if use_auto_feature_classification:
+        # 使用自动分类中的高基数特征列表
+        high_card_cols_to_process = auto_classification['high_cardinality_features']
+    else:
+        # 使用预定义的高基数特征列表
     high_card_cols_to_process = ['tls_server', 'http_host'] # USER: Add 'dns_server' etc. if selected and high card
+    
     for col in high_card_cols_to_process:
         if col in final_categorical_features:
             X_train, X_val, X_test = handle_high_cardinality_categorical(X_train, X_val, X_test, col, top_n=30)
@@ -643,7 +691,13 @@ if __name__ == '__main__':
         print(f"开始主预处理流程 (Starting main preprocessing pipeline)")
         processed_outputs = main_preprocess_pipeline(CSV_FILES, nrows_per_file=nrows_per_file)
         
-        X_train, X_val, X_test, y_train, y_val, y_test = processed_outputs[:6]
+        # 从字典中提取数据，而不是使用切片
+        X_train = processed_outputs['X_train']
+        X_val = processed_outputs['X_val']
+        X_test = processed_outputs['X_test']
+        y_train = processed_outputs['y_train']
+        y_val = processed_outputs['y_val']
+        y_test = processed_outputs['y_test']
 
         print(f"\n✅ 预处理完成！数据统计:")
         print(f"   训练集: {X_train.shape}")
