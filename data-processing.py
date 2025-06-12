@@ -447,13 +447,12 @@ def format_for_saint(X_train, X_val, X_test, y_train, y_val, y_test,
     
     return saint_data
 
-def main_preprocess_pipeline(filepath_list, nrows_per_file=None, use_auto_feature_classification=True):
-    """主要预处理流程 (Main preprocessing pipeline with enhanced feature classification)."""
+def main_preprocess_pipeline(filepath_list, nrows_per_file=None):
+    """主要预处理流程 (Main preprocessing pipeline with automatic feature classification)."""
     
-    # 0. 可选的自动特征分类
-    if use_auto_feature_classification:
-        print("🏷️  启用自动特征分类模式...")
-        classifier = CICIoTFeatureClassifier()
+    # 0. 自动特征分类器初始化
+    print("🏷️  初始化自动特征分类器...")
+    classifier = CICIoTFeatureClassifier()
     
     # 1. 加载并合并数据
     df_raw = load_and_combine_data(filepath_list, nrows_per_file=nrows_per_file)
@@ -479,36 +478,24 @@ def main_preprocess_pipeline(filepath_list, nrows_per_file=None, use_auto_featur
     # 5. 工程化特征
     X = engineer_features(X)
 
-    # 6. 特征选择：自动分类 vs 专家选择
-    if use_auto_feature_classification:
-        print("🏷️  使用自动特征分类...")
-        # 使用自动特征分类器
-        auto_classification = classifier.classify_features_automatically(X)
-        
-        # 获取分类结果
-        final_categorical_features = auto_classification['categorical_features']
-        final_numerical_features = auto_classification['numerical_features']
-        excluded_features = auto_classification['excluded_features'] + auto_classification['text_features']
-        
-        # 排除被标记为排除的特征
-        current_selected_features = final_categorical_features + final_numerical_features
-        current_selected_features = [f for f in current_selected_features if f in X.columns and f not in excluded_features]
-        
-        print(f"自动特征分类结果:")
-        print(f"   类别特征: {len(final_categorical_features)}")
-        print(f"   数值特征: {len(final_numerical_features)}")
-        print(f"   排除特征: {len(excluded_features)}")
-        print(f"   总选择特征: {len(current_selected_features)}")
-        
-    else:
-        print("🎯 使用专家特征选择...")
-        # 使用专家选择的特征
-    if 'protocol' in X.columns and 'protocol' not in ALL_SELECTED_FEATURES:
-         ALL_SELECTED_FEATURES.append('protocol')
-    current_selected_features = [f for f in ALL_SELECTED_FEATURES if f in X.columns]
-        
-        final_categorical_features = [f for f in SELECTED_CATEGORICAL_FEATURES if f in X.columns]
-        final_numerical_features = [f for f in SELECTED_NUMERICAL_FEATURES if f in X.columns]
+    # 6. 特征选择: 总是使用自动分类
+    print("🏷️  使用自动特征分类...")
+    auto_classification = classifier.classify_features_automatically(X)
+    
+    # 获取分类结果
+    final_categorical_features = auto_classification['categorical_features']
+    final_numerical_features = auto_classification['numerical_features']
+    excluded_features = auto_classification['excluded_features'] + auto_classification['text_features']
+    
+    # 排除被标记为排除的特征
+    current_selected_features = final_categorical_features + final_numerical_features
+    current_selected_features = [f for f in current_selected_features if f in X.columns and f not in excluded_features]
+    
+    print(f"自动特征分类结果:")
+    print(f"   类别特征: {len(final_categorical_features)}")
+    print(f"   数值特征: {len(final_numerical_features)}")
+    print(f"   排除特征: {len(excluded_features)}")
+    print(f"   总选择特征: {len(current_selected_features)}")
     
     X = X[current_selected_features].copy() # Use .copy()
     print(f"应用特征选择后。X 形状: {X.shape} (Applied feature selection. X shape: {X.shape})")
@@ -539,12 +526,9 @@ def main_preprocess_pipeline(filepath_list, nrows_per_file=None, use_auto_featur
     X_test = X_test.copy()
 
     # 8. 处理高基数类别特征
-    if use_auto_feature_classification:
-        # 使用自动分类中的高基数特征列表
-        high_card_cols_to_process = auto_classification['high_cardinality_features']
-    else:
-        # 使用预定义的高基数特征列表
-    high_card_cols_to_process = ['tls_server', 'http_host'] # USER: Add 'dns_server' etc. if selected and high card
+    # 总是使用自动分类中的高基数特征列表
+    print("\n⚡️ 自动识别高基数特征进行处理...")
+    high_card_cols_to_process = auto_classification.get('high_cardinality_features', [])
     
     for col in high_card_cols_to_process:
         if col in final_categorical_features:
